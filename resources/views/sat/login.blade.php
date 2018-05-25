@@ -49,7 +49,7 @@
                     <div class="row">
                         <div class="col-md-6 col-md-offset-3">
                             <label for="pass">Contraseña: </label>
-                            <input type="password" name="pass"2 id="pass">
+                            <input type="password" name="pass" id="pass">
                         </div>
                     </div>
                     <div class="row">

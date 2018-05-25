@@ -14,26 +14,11 @@ class SATController extends Controller
 {
     protected $client;
     protected $scraper;
+    protected $cookies;
 
     public function __construct()
     {
         $this->client = new Client();
-    }
-
-    public function login(Request $request)
-    {
-        $this->scraper = new SATScraper([
-            'rfc' => $request->rfc,
-            'ciec' => $request->pass,
-            'captcha' => $request->captcha,
-            'tipoDescarga' => 'emitidos',
-            'cancelados' => false
-        ]);
-
-        $this->scraper->downloadPeriod(2018, 4, 1, 2018, 4, 30);
-        $response = $this->scraper->getData();
-
-        return view('home')->with('response', $response);
     }
 
     public function loadLogin(Request $request)
@@ -60,5 +45,33 @@ class SATController extends Controller
             'imgpath' => $response['imgpath'],
             'cookies' => $response['cookies']
         ]);
+    }
+
+    public function login(Request $request)
+    {
+        $loginURL = '';
+        $response = $this->client->post('', [
+            'future' => true,
+            'verify' => false,
+            'headers' => [
+                'Accept' => ' text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding' => 'gzip, deflate',
+                'Accept-Language' => 'en-US,en;q=0.5',
+                'Connection' => 'keep-alive',
+                'Host' => $host,
+                'Referer' => $referer,
+                'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:31.0) Gecko/20100101 Firefox/31.0',
+                'Content-Type' => 'application/x-www-form-urlencoded'
+            ],
+            'form_params' => [
+                'Ecom_Password' => $request->pass,
+                'Ecom_User_ID' => $request->rfc,
+                'jcaptcha' => $request->captcha,
+                'option' => 'credential',
+                'submit' => 'Enviar',
+            ],
+        ])->getBody()->getContents();
+
+        return view('home')->with('response', $response);
     }
 }
