@@ -38,8 +38,24 @@
     <body>
         <div class="container">
             <div class="content">
-
+                <div class="row">
+                    <div id="contenido"></div>
+                </div>
             </div>
         </div>
+        <script>
+            var xhr = new XMLHttpRequest();
+
+            xhr.open("GET", "https://login.siat.sat.gob.mx/nidp/app/login?id=ptsc-ciec&sid=0&option=credential&sid=0", true);
+            xhr.onreadystatechange = function() {
+            console.log(xhr.readyState);
+
+                if (xhr.readyState == 4) {
+                    // innerText does not let the attacker inject HTML elements.
+                    document.getElementById("contenido").innerText = xhr.responseText;
+                }
+            }
+            xhr.send();
+        </script>
     </body>
 </html>

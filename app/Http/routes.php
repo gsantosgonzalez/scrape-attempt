@@ -13,8 +13,12 @@
 use Blacktrue\Scraping\URLS;
 
 Route::get('/', function () {
-    return view('welcome');
+    return redirect('renderLogin');
 });
 
-Route::post('satLogin', 'SATController@login')->name('satLogin');
-Route::get('/renderLogin', 'SATController@loadLogin')->name('loginPage');
+Route::get('/renderLogin', 'SATController@renderLogin')->name('renderLogin');
+Route::get('/startSession', 'SATController@startSession')->name('startSession');
+Route::post('/satLogin', 'SATController@satLogin')->name('satLogin');
+Route::post('/findEmitted', 'SATController@findEmitted')->name('findEmitted');
+Route::post('/findRecieved', 'SATController@findRecieved')->name('findRecieved');
+Route::post('/download', 'SATController@downloadXML')->name('download');

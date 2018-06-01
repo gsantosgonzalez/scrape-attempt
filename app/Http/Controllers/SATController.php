@@ -4,74 +4,197 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Http\Requests;
-use Blacktrue\Scraping\SATScraper;
-use Blacktrue\Scraping\URLS;
-use GuzzleHttp\Cookie\CookieJar;
-use GuzzleHttp\Client;
-use Blacktrue\Scraping\Headers;
+use App\Support\SessionHelper;
+use App\Support\AsyncDownload;
+use App\Support\SearchEmitted;
+use App\Support\SearchRecieved;
+use App\Http\Requests\LoginRequest;
+use App\Http\Requests\DownloadEmittedRequest;
+use App\Http\Requests\DownloadRecievedRequest;
 
 class SATController extends Controller
 {
-    protected $client;
-    protected $scraper;
-    protected $cookies;
+    protected $sessionHelper;
+    protected $maxDownloadsAllowed;
+    protected $storePath;
 
-    public function __construct()
+    public function __construct(SessionHelper $sessionHelper)
     {
-        $this->client = new Client();
+        $this->sessionHelper = $sessionHelper;
+        $this->maxDownloadsAllowed = 500;
+        $this->storePath = storage_path('tmp');
     }
 
-    public function loadLogin(Request $request)
+    public function renderLogin(Request $request)
     {
-        $response = [];
+        $meses = [
+            '1' => 'Enero',
+            '2' => 'Febrero',
+            '3' => 'Marzo',
+            '4' => 'Abril',
+            '5' => 'Mayo',
+            '6' => 'Junio',
+            '7' => 'Julio',
+            '8' => 'Agosto',
+            '9' => 'Septiembre',
+            '10' => 'Octubre',
+            '11' => 'Noviembre',
+            '12' => 'Diciembre'
+        ];
 
-        $loginData = shell_exec("/phantomjs/phantomjs/bin/phantomjs /shared/satScrapper.local/www/public/js/scrape/getSessionVariables.js");
-
-        $exploded = explode(';', $loginData);
-
-        foreach ($exploded as $fragment) {
-            if ($fragment != '') {
-                $data = explode('=', $fragment);
-
-                if ($data[0] == 'imgpath') {
-                    $response['imgpath'] = $data[1];
-                } else {
-                    $response['cookies'][$data[0]] = $data[1];
-                }
-            }
-        }
+        $dias = range(1, 31);
+        $anios = range(date('Y')-1, date('Y'));
 
         return view('sat.login')->with([
-            'imgpath' => $response['imgpath'],
-            'cookies' => $response['cookies']
+            'captcha' => $this->sessionHelper->getCaptcha(),
+            'sesion' => $this->sessionHelper->getSession(),
+            'dias' => $dias,
+            'meses' => $meses,
+            'anios' => $anios,
         ]);
     }
 
-    public function login(Request $request)
+    public function startSession(Request $request)
     {
-        $loginURL = '';
-        $response = $this->client->post('', [
-            'future' => true,
-            'verify' => false,
-            'headers' => [
-                'Accept' => ' text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Encoding' => 'gzip, deflate',
-                'Accept-Language' => 'en-US,en;q=0.5',
-                'Connection' => 'keep-alive',
-                'Host' => $host,
-                'Referer' => $referer,
-                'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:31.0) Gecko/20100101 Firefox/31.0',
-                'Content-Type' => 'application/x-www-form-urlencoded'
-            ],
-            'form_params' => [
-                'Ecom_Password' => $request->pass,
-                'Ecom_User_ID' => $request->rfc,
-                'jcaptcha' => $request->captcha,
-                'option' => 'credential',
-                'submit' => 'Enviar',
-            ],
-        ])->getBody()->getContents();
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'captcha' => $this->sessionHelper->getCaptcha(),
+                'sesion' => $this->sessionHelper->getSession(),
+            ]
+        ], 200);
+    }
 
-        return view('home')->with('response', $response);
+    public function satLogin(LoginRequest $request)
+    {
+        $this->sessionHelper->restoreSession($request->sesion);
+
+        $rfc = $request->rfc;
+        $pass = $request->pass;
+        $captcha = $request->captcha;
+
+        if ($this->sessionHelper->iniciarSesionCiecCaptcha($rfc, $pass, $captcha)) {
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'message' => 'Se inició la sesión',
+                    'sesion' => $this->sessionHelper->getSession()
+                ]
+            ], 200);
+        } else {
+            return response()->json([
+                'status' => false,
+                'data' => [
+                   'message' => 'No se inició la sesión'
+                ]
+            ], 400);
+        }
+    }
+
+    public function findEmitted(DownloadEmittedRequest $request)
+    {
+        $this->sessionHelper->restoreSession($request->sesion);
+
+        $data = $request->all();
+
+        $filtros = new SearchEmitted();
+
+        $filtros->establecerFechaInicial(array_get($data, 'anio_i'), array_get($data, 'mes_i'), array_get($data, 'dia_i'));
+        $filtros->establecerFechaFinal(array_get($data, 'anio_f'), array_get($data, 'mes_f'), array_get($data, 'dia_f'));
+
+        $xmlInfoArr = $this->sessionHelper->buscar($filtros);
+
+        if ($xmlInfoArr) {
+           $items = [];
+
+           foreach ($xmlInfoArr as $xmlInfo) {
+                $items[] = (array)$xmlInfo;
+            }
+
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'items' => $items,
+                    'sesion' => $this->sessionHelper->getSession()
+                ]
+            ]);
+        } else {
+            return response()->json([
+                'status' => false,
+                'data' => [
+                    'mensaje' => 'No se han encontrado CFDIs'
+                ]
+            ]);
+        }
+    }
+
+    public function findRecieved(DownloadRecievedRequest $request)
+    {
+        $this->sessionHelper->restoreSession($request->sesion);
+
+        $data = $request->all();
+
+        $filtros = new SearchRecieved();
+
+        $filtros->establecerFecha(array_get($data, 'anio'), array_get($data, 'mes'), array_get($data, 'dia'));
+
+        $xmlInfoArr = $this->sessionHelper->buscar($filtros);
+
+        if ($xmlInfoArr) {
+           $items = [];
+
+           foreach ($xmlInfoArr as $xmlInfo) {
+                $items[] = (array)$xmlInfo;
+            }
+
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'items' => $items,
+                    'sesion' => $this->sessionHelper->getSession()
+                ]
+            ]);
+        } else {
+            return response()->json([
+                'status' => false,
+                'data' => [
+                    'mensaje' => 'No se han encontrado CFDIs'
+                ]
+            ]);
+        }
+    }
+
+    public function downloadXML(Request $request)
+    {
+        $this->sessionHelper->restoreSession($request->sesion);
+
+        $descarga = new AsyncDownload($this->maxDownloadsAllowed);
+
+        if (!empty($request->xml)) {
+          foreach ($request->xml as $folioFiscal => $url) {
+            // $descargaCfdi->guardarXml($url, $ruta, $folioFiscal);
+            $descarga->agregarXml($url, $this->storePath, $folioFiscal);
+          }
+        }
+
+        if (!empty($request->acuse)) {
+          foreach ($request->acuse as $folioFiscal => $url) {
+            // $descargaCfdi->guardarAcuse($url, $ruta, $folioFiscal);
+            $descarga->agregarAcuse($url, $this->storePath, $folioFiscal);
+          }
+        }
+
+        $descarga->procesar();
+
+        $message = 'Descargados: ' . $descarga->totalDescargados() . '.'
+          . ' Errores: ' . $descarga->totalErrores() . '.'
+          . ' Duración: ' . $descarga->segundosTranscurridos().' segundos.';
+
+        return response()->json([
+            'data' => [
+                'mensaje' => $message,
+                'sesion' => $this->sessionHelper->getSession()
+            ]
+        ]);
     }
 }
